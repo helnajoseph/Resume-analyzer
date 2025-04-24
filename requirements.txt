@@ -34,7 +34,7 @@ python-magic==0.4.27
 
 # Email Functionality
 secure-smtplib==0.1.1
-fpdf2==2.7.7  # For PDF generation
+fpdf==1.7.2  # For PDF generation
 
 
 # Development (optional)
