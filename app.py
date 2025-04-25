@@ -1242,7 +1242,58 @@ if uploaded_file:
 # Landing Page
 else:
     st.markdown("""
-# CVInsight
+    <style>
+    .header-wrapper {
+        background: linear-gradient(135deg, #0F1B2D, #1B3A5D);
+        margin: -1.5rem -1rem 2rem -1rem;
+        padding: 2rem;
+        border-radius: 0 0 20px 20px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+    
+    .title {
+        font-size: 52px;
+        font-weight: 900;
+        color: white;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        margin-bottom: 0;
+        letter-spacing: 1px;
+        position: relative;
+        display: inline-block;
+    }
+    
+    .title::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        bottom: -8px;
+        width: 60%;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 2px;
+    }
+    
+    .subtitle {
+        font-size: 18px;
+        color: rgba(255, 255, 255, 0.95);
+        margin-top: 15px;
+        font-weight: 400;
+        text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+    }
+    
+    .accent-text {
+        color: #4A90E2;
+        font-weight: 600;
+    }
+    </style>
+    
+    <div class="header-wrapper">
+        <div class="title">CVInsight</div>
+        <div class="subtitle">Transform Your Resume with <span class="accent-text">AI-Powered</span> Analysis</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
 Upload your resume to get:
 - **Basic Mode**: Quick analysis and scores
 - **Advanced Mode**: Full AI-powered insights
