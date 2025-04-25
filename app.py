@@ -1061,7 +1061,7 @@ if uploaded_file:
             f"Provide 3 most important improvements for this resume in bullet points:\n{resume_text[:3000]}" + 
             (f"\nConsidering this job description:\n{job_desc[:1000]}" if job_desc else "")
         )
-        st.write(tips)
+        st.markdown(tips)
         
         # Switch to Advanced button
         if st.button("Switch to Advanced Analysis"):
@@ -1294,23 +1294,16 @@ else:
     """, unsafe_allow_html=True)
 
     st.markdown("""
-Upload your resume to get:
-- **Basic Mode**: Quick analysis and scores
-- **Advanced Mode**: Full AI-powered insights
+###  Upload Your Resume to Get Started
 
-##### Features:
-1. Resume ATS compatibility scoring
-2. Job description matching
-3. Skills gap analysis
-4. Personalized improvement suggestions
-5. Interactive AI resume coach
-6. Downloadable PDF reports
+Get instant insights with **Basic Mode** or dive deeper with **Advanced Mode** for full AI-powered analysis.  
+Features include ATS scoring, job match evaluation, skills gap analysis, improvement tips, and downloadable PDF reports.
 
-Get started by uploading your resume on the left sidebar!
+ Simply upload your resume using the sidebar!
 """)
 
     st.info("**Pro Tip**: For the best results, paste a job description you're interested in applying for. This will provide you with tailored matching analysis and recommendations.")
-    
+
     # Sample Resume and Job Description Section
     with st.expander("Need examples? Click here for sample content"):
         col1, col2 = st.columns(2)
@@ -1380,15 +1373,14 @@ BENEFITS:
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.metric("Resume Success Rate", "+35%")
-        st.caption("Average improvement in interview callbacks")
+        st.metric("Resume Success Rate", "↑ 65%")
+        st.caption("Average boost in interview callbacks")
     
     with col2:
-        st.metric("ATS Pass Rate", "+42%")
-        st.caption("Increase in resumes passing ATS filters")
+        st.metric("ATS Pass Rate", "↑ 50%")
+        st.caption("More resumes passing applicant tracking systems")
     
     with col3:
         st.metric("Job Match Accuracy", "95%")
-        st.caption("Precision of our AI job matching algorithm")
-
+        st.caption("Precision of our AI in matching job descriptions")
 
