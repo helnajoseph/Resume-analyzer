@@ -10,7 +10,6 @@ from datetime import datetime
 from fpdf import FPDF
 import json
 
-
 import io  # For in-memory file operations
 import tempfile  # For temporary file storage
 import logging  # For structured logging
@@ -207,10 +206,17 @@ def estimate_salary(job_title: str, location: str, experience: int) -> str:
     Consider regional cost of living factors, industry standards, and experience level.
     Include both annual salary range and hourly rate if applicable.
     
-    Return as JSON with:
+    Return JSON with:
     {{
-        "annual_range": "$XX,XXX - $YY,YYY",
-        "hourly_range": "$XX - $YY per hour",
+        "annual_range": {{
+            "min": "minimum annual salary with currency symbol",
+            "max": "maximum annual salary with currency symbol"
+        }},
+        "hourly_range": {{
+            "min": "minimum hourly rate with currency symbol",
+            "max": "maximum hourly rate with currency symbol"
+        }},
+        "currency": "currency code (e.g., USD, INR, EUR)",
         "factors": ["List", "of", "factors", "considered"],
         "confidence": 1-10 confidence score
     }}
@@ -225,11 +231,16 @@ def estimate_salary(job_title: str, location: str, experience: int) -> str:
         )
         salary_data = json.loads(salary_response.choices[0].message.content)
         
-        # Format the response nicely
-        result = f"**Annual Salary Range:** {salary_data.get('annual_range', 'N/A')}\n"
+        # Format the response nicely with proper currency formatting
+        annual_min = salary_data.get('annual_range', {}).get('min', 'N/A')
+        annual_max = salary_data.get('annual_range', {}).get('max', 'N/A')
+        hourly_min = salary_data.get('hourly_range', {}).get('min', 'N/A')
+        hourly_max = salary_data.get('hourly_range', {}).get('max', 'N/A')
         
-        if salary_data.get('hourly_range'):
-            result += f"**Hourly Rate:** {salary_data.get('hourly_range')}\n"
+        result = f"**Annual Salary Range:** {annual_min} - {annual_max}\n"
+        
+        if hourly_min != 'N/A' and hourly_max != 'N/A':
+            result += f"**Hourly Rate:** {hourly_min} - {hourly_max} per hour\n"
             
         result += f"\n**Factors Considered:**\n"
         for factor in salary_data.get('factors', ['Market rates', 'Experience level', 'Location']):
@@ -241,12 +252,130 @@ def estimate_salary(job_title: str, location: str, experience: int) -> str:
         return result
     except Exception as e:
         # Provide fallback response in case of error
-        fallback = f"**Estimated Salary Range:** ${'50,000 - $90,000' if experience < 5 else '80,000 - $130,000'} per year\n"
+        currency = 'USD' if location.lower() in ['united states', 'usa', 'us'] else '$'
+        fallback = f"**Estimated Salary Range:** {currency}{'50,000 - $90,000' if experience < 5 else '80,000 - $130,000'} per year\n"
         fallback += f"**Note:** This is a general estimate based on limited information."
         return fallback
 
+def analyze_grammar_and_language(resume_text: str) -> Dict:
+    """
+    Enhanced grammar and language analysis with detailed categorization and specific error detection
+    
+    Args:
+        resume_text: The text content of the resume
+        
+    Returns:
+        Dictionary containing grammar score and detailed language analysis
+    """
+    # Prepare more specific prompts for better analysis
+    grammar_prompt = f"""Perform a detailed grammar and language analysis on this resume:
+    {resume_text[:5000]}
+    
+    Analyze the following aspects:
+    1. Grammar errors (subject-verb agreement, tense consistency, etc.)
+    2. Spelling issues (including commonly misspelled professional terms)
+    3. Punctuation problems
+    4. Sentence structure (run-ons, fragments, etc.)
+    5. Style and tone consistency
+    6. Professional vocabulary usage
+    7. Action verb effectiveness
+    8. Overall readability
+    
+    Return JSON with:
+    {{
+        "grammar_score": Overall score from 0-100,
+        "error_count": Total number of errors detected,
+        "categorized_issues": {{
+            "grammar": ["List of specific grammar errors found"],
+            "spelling": ["List of misspelled words with correct versions"],
+            "punctuation": ["List of punctuation issues"],
+            "structure": ["List of sentence structure problems"],
+            "style": ["List of style inconsistencies"]
+        }},
+        "severity_rating": Rating from 1-5 (1=minor issues, 5=critical problems),
+        "top_improvements": ["List of 3-5 most important fixes"],
+        "impact_on_perception": "Brief assessment of how errors impact professional perception"
+    }}
+    """
+    
+    try:
+        grammar_response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": grammar_prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.1
+        )
+        
+        grammar_data = json.loads(grammar_response.choices[0].message.content)
+        
+        # Process and enhance the grammar analysis
+        analysis_result = {
+            'grammar_score': float(grammar_data.get('grammar_score', 0)),
+            'error_count': int(grammar_data.get('error_count', 0)),
+            'categorized_issues': grammar_data.get('categorized_issues', {
+                'grammar': [],
+                'spelling': [],
+                'punctuation': [],
+                'structure': [],
+                'style': []
+            }),
+            'severity_rating': int(grammar_data.get('severity_rating', 1)),
+            'top_improvements': grammar_data.get('top_improvements', []),
+            'impact_assessment': grammar_data.get('impact_on_perception', '')
+        }
+        
+        # Add category totals for better reporting
+        analysis_result['category_counts'] = {
+            category: len(issues) 
+            for category, issues in analysis_result['categorized_issues'].items()
+        }
+        
+        # Calculate priority score to highlight most important issues
+        if analysis_result['error_count'] > 0:
+            # Weighted severity calculation
+            weights = {
+                'grammar': 1.2,  # Grammar errors are highly visible
+                'spelling': 1.5,  # Spelling errors create very negative impressions
+                'punctuation': 0.8,  # Less critical but still important
+                'structure': 1.0,  # Important for readability
+                'style': 0.7      # Important but more subjective
+            }
+            
+            category_scores = {}
+            for category, issues in analysis_result['categorized_issues'].items():
+                if issues:
+                    category_scores[category] = len(issues) * weights.get(category, 1.0)
+            
+            analysis_result['priority_categories'] = sorted(
+                category_scores.keys(),
+                key=lambda x: category_scores[x],
+                reverse=True
+            )
+        else:
+            analysis_result['priority_categories'] = []
+            
+        return analysis_result
+        
+    except Exception as e:
+        st.error(f"Grammar analysis failed: {str(e)}")
+        # Provide fallback analysis
+        return {
+            'grammar_score': 70,  # Default moderate score
+            'error_count': 0,
+            'categorized_issues': {
+                'grammar': [],
+                'spelling': [],
+                'punctuation': [],
+                'structure': [],
+                'style': []
+            },
+            'severity_rating': 1,
+            'top_improvements': ["Error analyzing grammar - please check manually"],
+            'impact_assessment': "Unable to assess impact due to analysis error"
+        }
+
 def calculate_ats_score(resume_text: str, job_desc: str = "") -> Dict[str, float]:
-    """Calculate multiple ATS-related scores"""
+    """Calculate multiple ATS-related scores with improved grammar analysis"""
     scores = {
         'ats_compliance': 0,
         'content_quality': 0,
@@ -254,7 +383,7 @@ def calculate_ats_score(resume_text: str, job_desc: str = "") -> Dict[str, float
         'grammar_score': 0
     }
     
-    # ATS Compliance Check
+    # ATS Compliance Check - unchanged from original
     ats_prompt = f"""Analyze this resume for ATS compliance:
     {resume_text[:5000]}
     
@@ -288,32 +417,14 @@ def calculate_ats_score(resume_text: str, job_desc: str = "") -> Dict[str, float
     except Exception as e:
         st.error(f"ATS scoring failed: {str(e)}")
     
-    # Grammar and Language Check
-    grammar_prompt = f"""Analyze this resume for language quality:
-    {resume_text[:5000]}
+    # Use the new improved grammar analysis function
+    grammar_analysis = analyze_grammar_and_language(resume_text)
     
-    Return JSON with:
-    - "grammar_score" (0-100)
-    - "language_issues": Specific issues
-    - "improvement_suggestions"
-    """
-    
-    try:
-        grammar_response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": grammar_prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.1
-        )
-        grammar_data = json.loads(grammar_response.choices[0].message.content)
-        
-        scores.update({
-            'grammar_score': float(grammar_data.get('grammar_score', 0)),
-            'language_issues': grammar_data.get('language_issues', []),
-            'improvement_suggestions': grammar_data.get('improvement_suggestions', [])
-        })
-    except Exception as e:
-        st.error(f"Grammar check failed: {str(e)}")
+    # Update scores with grammar analysis results
+    scores.update({
+        'grammar_score': grammar_analysis.get('grammar_score', 0),
+        'grammar_analysis': grammar_analysis
+    })
     
     return scores
 
@@ -387,6 +498,60 @@ def visualize_scores(scores: Dict[str, float]):
             ]
         })
         st.bar_chart(score_df.set_index('Metric'))
+
+def display_grammar_analysis(grammar_analysis):
+    """Display enhanced grammar analysis results in the UI"""
+    st.subheader("Grammar and Language Analysis")
+    
+    # Display overall score with color coding
+    score = grammar_analysis.get('grammar_score', 0)
+    col1, col2 = st.columns([1, 3])
+    
+    with col1:
+        if score >= 85:
+            st.success(f"Score: {score}/100")
+        elif score >= 70:
+            st.info(f"Score: {score}/100")  
+        else:
+            st.warning(f"Score: {score}/100")
+            
+    with col2:
+        st.progress(score/100)
+    
+    # Display impact assessment
+    if grammar_analysis.get('impact_assessment'):
+        st.write("**Impact on Perception:**")
+        st.write(grammar_analysis.get('impact_assessment'))
+    
+    # Show error counts by category
+    if grammar_analysis.get('category_counts'):
+        st.write("**Issue Summary:**")
+        categories = grammar_analysis['category_counts']
+        
+        if sum(categories.values()) > 0:
+            for category, count in categories.items():
+                if count > 0:
+                    st.write(f"- {category.title()}: {count} issues")
+        else:
+            st.success("No significant grammar or language issues detected!")
+    
+    # Display priority improvements
+    if grammar_analysis.get('top_improvements'):
+        st.write("**Top Priority Improvements:**")
+        for imp in grammar_analysis.get('top_improvements'):
+            st.info(f"• {imp}")
+    
+    # Show detailed issues if they exist
+    if grammar_analysis.get('categorized_issues'):
+        with st.expander("Detailed Issue Breakdown"):
+            categories = grammar_analysis['categorized_issues']
+            
+            for category, issues in categories.items():
+                if issues:
+                    st.write(f"**{category.title()} Issues:**")
+                    for issue in issues:
+                        st.write(f"- {issue}")
+                    st.write("")  # Add spacing between categories
 
 def create_pdf_report(report_content: str) -> bytes:
     """Generate a professionally styled PDF report with Unicode support and proper score formatting"""
@@ -953,7 +1118,21 @@ if uploaded_file:
                 'ats_requirements': scores.get('ats_requirements', []),
                 'missing_elements': scores.get('missing_elements', []),
                 'language_issues': scores.get('language_issues', []),
-                'grammar_suggestions': scores.get('improvement_suggestions', [])
+                'grammar_suggestions': scores.get('improvement_suggestions', []),
+                'grammar_analysis': scores.get('grammar_analysis', {
+                    'grammar_score': 0,
+                    'error_count': 0,
+                    'categorized_issues': {
+                        'grammar': [],
+                        'spelling': [],
+                        'punctuation': [],
+                        'structure': [],
+                        'style': []
+                    },
+                    'severity_rating': 1,
+                    'top_improvements': [],
+                    'impact_assessment': 'No analysis available'
+                })
             }
             
             salary = estimate_salary(
@@ -995,18 +1174,7 @@ if uploaded_file:
                     st.write(f"- {missing}")
         
         with selected_tabs[5]:
-            st.subheader("Grammar and Language Issues")
-            if analysis['language_issues']:
-                st.warning("Found these language issues:")
-                for issue in analysis['language_issues'][:5]:
-                    st.write(f"- {issue}")
-            else:
-                st.success("No significant grammar issues found!")
-            
-            if analysis['grammar_suggestions']:
-                st.info("Language Improvement Suggestions:")
-                for suggestion in analysis['grammar_suggestions'][:3]:
-                    st.write(f"- {suggestion}")
+            display_grammar_analysis(analysis['grammar_analysis'])
         
         with selected_tabs[6]:
             st.subheader("Interactive Resume Coach")
@@ -1086,7 +1254,6 @@ Upload your resume to get:
 4. Personalized improvement suggestions
 5. Interactive AI resume coach
 6. Downloadable PDF reports
-
 
 Get started by uploading your resume on the left sidebar!
 """)
@@ -1172,3 +1339,5 @@ BENEFITS:
     with col3:
         st.metric("Job Match Accuracy", "95%")
         st.caption("Precision of our AI job matching algorithm")
+
+
