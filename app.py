@@ -62,13 +62,28 @@ def extract_personal_info(resume_text: str) -> Dict[str, str]:
         'experience_years': 0
     }
 
-    # Email extraction - improved pattern
-    email_pattern = r'\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b'
-    emails = re.findall(email_pattern, resume_text)
-    if emails:
-        valid_emails = [e for e in emails if '.' in e.split('@')[1]]
-        if valid_emails:
-            info['email'] = valid_emails[0]
+    # Email extraction - multiple patterns for better detection
+    email_patterns = [
+        r'\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b',  # Standard email
+        r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',      # Without word boundaries
+        r'(?i)email[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',  # After "Email:"
+        r'(?i)e-?mail[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',  # After "E-mail:"
+        r'(?i)contact[:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',  # After "Contact:"
+    ]
+    
+    for pattern in email_patterns:
+        emails = re.findall(pattern, resume_text)
+        if emails:
+            # If pattern captures groups, get the first group; otherwise, use the whole match
+            if isinstance(emails[0], tuple):
+                email = emails[0][0] if emails[0][0] else emails[0]
+            else:
+                email = emails[0]
+            
+            # Validate email
+            if '@' in email and '.' in email.split('@')[1] and len(email) > 5:
+                info['email'] = email.strip()
+                break
 
     # Phone number extraction
     phone_patterns = [
@@ -90,24 +105,57 @@ def extract_personal_info(resume_text: str) -> Dict[str, str]:
                 info['phone'] = phone
                 break
     
+    # Location extraction - improved patterns
+    location_patterns = [
+        r'(?i)(?:address|location|city|residence)[:\s]*([A-Za-z\s,.-]+(?:,\s*[A-Z]{2,})?)',
+        r'(?i)([A-Za-z\s]+,\s*[A-Z]{2,3}(?:\s+\d{5})?)',  # City, State ZIP
+        r'(?i)([A-Za-z\s]+,\s*[A-Za-z\s]+,\s*[A-Z]{2,})',  # City, State, Country
+        r'(?i)\|\s*([A-Za-z\s,.-]+)\s*\|',  # Between pipe symbols
+        r'(?i)([A-Za-z\s]+,\s*[A-Z]{2})\s*(?:\||$)',  # City, State before pipe or end
+    ]
+    
+    for pattern in location_patterns:
+        locations = re.findall(pattern, resume_text)
+        if locations:
+            location = locations[0].strip()
+            # Filter out common non-location matches
+            if (len(location) > 3 and 
+                not any(word in location.lower() for word in ['email', 'phone', 'linkedin', 'github', 'www', '.com', '@']) and
+                any(char.isalpha() for char in location)):
+                info['location'] = location
+                break
+    
     # AI-powered extraction for remaining fields
-    prompt = f"""Analyze this resume excerpt:
-    {resume_text[:2500]}
+    prompt = f"""Analyze this resume excerpt and extract personal information:
+    {resume_text[:3000]}
+    
+    Look carefully for:
+    1. Full name (usually at the top of the resume)
+    2. Location/Address (city, state, country - look for geographic locations)
+    3. Years of experience (calculate from job dates, "X years", etc.)
+    4. Email address (current found: {info['email'] if info['email'] else "Not found"})
+    5. Phone number (current found: {info['phone'] if info['phone'] else "Not found"})
     
     Return JSON with:
-    - "name": Full name
-    - "location": City/State/Country
-    - "experience_years": Estimated years
-    - "email": Verify this: {info['email'] if info['email'] else "Not found"}
-    - "phone": Verify this: {info['phone'] if info['phone'] else "Not found"}
+    {{
+        "name": "Full name of the person",
+        "location": "City, State/Country (be specific about geographic location)",
+        "experience_years": "Number of years experience as integer",
+        "email": "Email address if found (validate it has @ and .)",
+        "phone": "Phone number if found"
+    }}
     """
     
     try:
         ai_response = client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": "You are an expert HR assistant that extracts personal information from resumes accurately. Be specific about locations (include city/state/country) and validate email formats. Look carefully at the entire resume text."},
+                {"role": "user", "content": prompt}
+            ],
             response_format={"type": "json_object"},
-            temperature=0.1
+            temperature=0.1,
+            max_tokens=800
         )
         ai_data = json.loads(ai_response.choices[0].message.content)
         
@@ -605,9 +653,20 @@ def create_pdf_report(report_content: str) -> bytes:
             self.set_text_color(21, 76, 121)  # Dark blue bullet
             self.cell(5, 6, chr(149), 0, 0)  # Bullet point character (•)
             self.set_text_color(50, 50, 50)  # Back to dark gray
-            # Handle non-Latin characters
+            # Handle non-Latin characters and long text
             safe_text = text.encode('latin-1', errors='replace').decode('latin-1')
-            self.multi_cell(0, 6, safe_text)
+            
+            # Prevent text overflow issues
+            if len(safe_text) > 120:  # Truncate very long text
+                safe_text = safe_text[:117] + "..."
+            
+            try:
+                self.multi_cell(0, 6, safe_text)
+            except Exception:
+                # Fallback: use cell instead of multi_cell for problematic text
+                if len(safe_text) > 60:
+                    safe_text = safe_text[:57] + "..."
+                self.cell(0, 6, safe_text, 0, 1)
             
         def bold_bullet_item(self, label, text, indent=0):
             self.set_font('Helvetica', 'B', 11)
@@ -623,17 +682,33 @@ def create_pdf_report(report_content: str) -> bytes:
                 self.cell(70, 6, f"{label}:", 0, 0)  # Fixed width cell for label
                 self.set_font('Helvetica', 'B', 11)  # Keep bold for score
                 self.set_text_color(50, 50, 50)
-                # Handle non-Latin characters
+                # Handle non-Latin characters and truncate if too long
                 safe_text = text.encode('latin-1', errors='replace').decode('latin-1')
+                if len(safe_text) > 30:  # Truncate very long text
+                    safe_text = safe_text[:27] + "..."
                 self.cell(0, 6, safe_text, 0, 1)
             else:
-                # Original behavior for non-score items
+                # Original behavior for non-score items - with better text handling
                 self.cell(30, 6, f"{label}:", 0, 0)
                 self.set_font('Helvetica', '', 11)
                 self.set_text_color(50, 50, 50)  # Back to dark gray
-                # Handle non-Latin characters
+                # Handle non-Latin characters and ensure text fits
                 safe_text = text.encode('latin-1', errors='replace').decode('latin-1')
-                self.multi_cell(0, 6, safe_text)
+                
+                # Calculate available width after label and indentation
+                available_width = 190 - 30 - indent - 5  # Page width minus margins and label
+                
+                if len(safe_text) > 80:  # Split very long text
+                    # Use simpler approach - just truncate with ellipsis
+                    safe_text = safe_text[:77] + "..."
+                
+                try:
+                    self.multi_cell(0, 6, safe_text)
+                except Exception:
+                    # Fallback: use cell instead of multi_cell for problematic text
+                    if len(safe_text) > 50:
+                        safe_text = safe_text[:47] + "..."
+                    self.cell(0, 6, safe_text, 0, 1)
             
         def score_item(self, label, score, indent=0):
             """Special method for formatting score items with proper alignment"""
@@ -817,10 +892,26 @@ def create_pdf_report(report_content: str) -> bytes:
     pdf.cell(0, 10, f'Generated on {datetime.now().strftime("%B %d, %Y at %H:%M")}', 0, 1, 'R')
     
     try:
-        return pdf.output(dest='S').encode('latin-1')
-    except UnicodeEncodeError:
-        # If we still have encoding issues, try a more aggressive approach
-        return pdf.output(dest='S').encode('ascii', errors='replace')
+        # Get the PDF output as bytes
+        pdf_output = pdf.output(dest='S')
+        
+        # Check if it's already bytes or needs encoding
+        if isinstance(pdf_output, bytes):
+            return pdf_output
+        elif isinstance(pdf_output, (str, bytearray)):
+            return bytes(pdf_output, 'latin-1') if isinstance(pdf_output, str) else bytes(pdf_output)
+        else:
+            # Fallback for other types
+            return str(pdf_output).encode('latin-1', errors='replace')
+    except Exception as e:
+        st.error(f"PDF generation error: {str(e)}")
+        # Return a minimal PDF as fallback
+        fallback_pdf = PDF()
+        fallback_pdf.add_page()
+        fallback_pdf.set_font('Helvetica', '', 12)
+        fallback_pdf.cell(0, 10, 'Error generating full report. Please try again.', 0, 1)
+        fallback_output = fallback_pdf.output(dest='S')
+        return bytes(fallback_output, 'latin-1') if isinstance(fallback_output, str) else bytes(fallback_output)
 
 def generate_report_content(personal_info, scores, analysis, salary, job_match=None):
     """Generate clean, structured report content"""
@@ -1223,21 +1314,6 @@ if uploaded_file:
         # Salary Estimation
         with st.expander("Expected Salary Range"):
             st.write(salary)
-        
-        # Report Generation
-        st.header("Download Your Report")
-        
-        report_content = generate_report_content(
-            personal_info, scores, analysis, salary, job_match
-        )
-        
-        pdf_bytes = create_pdf_report(report_content)
-        st.download_button(
-            label="Download PDF Report",
-            data=pdf_bytes,
-            file_name="resume_analysis_report.pdf",
-            mime="application/pdf"
-        )
 
 # Landing Page
 else:
@@ -1383,4 +1459,3 @@ BENEFITS:
     with col3:
         st.metric("Job Match Accuracy", "95%")
         st.caption("Precision of our AI in matching job descriptions")
-
